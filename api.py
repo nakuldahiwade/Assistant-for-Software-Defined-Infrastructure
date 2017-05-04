@@ -7,6 +7,7 @@ from flask.ext.login import LoginManager, UserMixin, \
 from assistant.base import Decider
 from assistant.base import app
 from assistant.base import bot
+from assistant.base import blob
 from assistant.client import OpenStackClient
 from assistant.sessions_file import SESSION
 
@@ -103,16 +104,18 @@ def end_point():
     try:
         # To chatterbot
         question = request.args.get('question')
+        label = blob.classify(question)
+        SESSION['label'] = label
         bot_response = str(bot.get_response(question))
         print "Question "+question
         print "Bot Response "+bot_response
         code = bot_response.split(':')[0]
         response = bot_response.split(':')[1]
         # Call code checker.
-        return Decider(code, response).get_response()
+        return Decider(code, label, response).get_response()
     except Exception, e:
         print e
-        return Decider('0.0', bot_response).get_response()
+        return Decider('0', 'general', bot_response).get_response()
 
 
 @app.route('/set')
@@ -121,13 +124,15 @@ def set():
     key = request.args.get('key')
     value = request.args.get('value')
     SESSION[key] = value
+    label = SESSION.get('label')
     bot_response = str(bot.get_response(key))
     print "Bot Response " + bot_response
     code = bot_response.split(':')[0]
     response = bot_response.split(':')[1]
     # Update corpus question = key and answer = code, response.
-    return Decider(code, response).get_response()
+    return Decider(code, label, response).get_response()
 
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8081)
+
