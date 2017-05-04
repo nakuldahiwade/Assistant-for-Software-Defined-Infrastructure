@@ -4,6 +4,9 @@ from chatterbot.response_selection import get_random_response
 from flask import Flask, jsonify
 import json
 import os
+from textblob import TextBlob
+from textblob.classifiers import NaiveBayesClassifier
+from train_set import train_set
 from shutil import copyfile
 
 
@@ -11,6 +14,16 @@ from assistant.client import \
     DeployOpenStackCloud, NovaClient, NeutronClient, CinderClient
 from assistant.sessions_file import SESSION
 from assistant.utils import CopyCorpus
+
+
+class Blob(object):
+    def __init__(self):
+        self.train = train_set.train
+        self.cl = NaiveBayesClassifier(self.train)
+
+    def classify(self, question):
+        label = self.cl.classify(question)
+        return label
 
 
 class OpenStackBot(object):
@@ -155,6 +168,7 @@ class CodeNova(Code):
                                 ':')[1]
                             return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -167,6 +181,7 @@ class CodeNova(Code):
                     return self.createJSONResponse("", None, "No VMs")
                 return self.createJSONResponse("", nova_list,  self.response)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -201,6 +216,7 @@ class CodeNova(Code):
                                     ':')[1])
                             return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -231,6 +247,7 @@ class CodeNova(Code):
                             'VM_Delete_All_Not_Confirm')).split(':')[1]
                         return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -242,6 +259,7 @@ class CodeNova(Code):
                 #avail_zone = ['<:az>']
                 return self.createJSONResponse("", avail_zone, self.response)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -293,6 +311,7 @@ class CodeNeutron(Code):
                                 'Network_Create_Not_Confirm')).split(':')[1]
                             return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -306,6 +325,7 @@ class CodeNeutron(Code):
                     return self.createJSONResponse("", None, "No Networks")
                 return self.createJSONResponse("", network_list, self.response)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -341,6 +361,7 @@ class CodeNeutron(Code):
                                 'Network_Delete_Not_Confirm')).split(':')[1]
                             return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -371,6 +392,7 @@ class CodeNeutron(Code):
                             'Network_Delete_All_Not_Confirm')).split(':')[1]
                         return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -395,6 +417,7 @@ class CodeCinder(Code):
                     return self.createJSONResponse("", None, "No Volumes")
                 return self.createJSONResponse("", volume_list, self.response)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -443,6 +466,7 @@ class CodeDeploy(Code):
                                 ':')[1]
                         return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -475,8 +499,8 @@ class CodeCleanup(Code):
                                                    res, True)
                 else:
                     if SESSION['cloud_clean_up'] == 'yes':
-                    # TODO(ndahiwade): Add to the bulk deletion with future
-                    # enhancements ( Eg. Storage)
+                        # TODO(ndahiwade): Add to the bulk deletion with future
+                        # enhancements ( Eg. Storage)
                         NovaClient().nova_vm_delete_all()
                         NeutronClient().net_delete_all()
                         SESSION.clear()
@@ -491,6 +515,7 @@ class CodeCleanup(Code):
                             'Cloud_Clean_Up_Not_Confirm')).split(':')[1]
                         return self.createJSONResponse("", None, res)
         except Exception as e:
+            SESSION.clear()
             response = "Oops! It failed with - " + str(e)
             if "\n" in response:
                 response = response.replace("\n", "")
@@ -499,26 +524,26 @@ class CodeCleanup(Code):
 
 # Extend this dict to add new classes.
 resource_class_keypair = {
-    '0': CodeText,
-    '1': CodeNova,
-    '2': CodeNeutron,
-    '3': CodeCinder,
-    '4': CodeDeploy,
-    '5': CodeCleanup,
+    'general': CodeText,
+    'compute': CodeNova,
+    'network': CodeNeutron,
+    'storage': CodeCinder,
+    'deploy': CodeDeploy,
+    'cleanup': CodeCleanup,
 }
 
 
 class Decider(object):
-    def __init__(self, code, response):
+    def __init__(self, code, label, response):
         # Decide if General_response/nova/neutron/cinder etc.
-        resource = resource_class_keypair[code[0]]
+        resource = resource_class_keypair[label]
         # Decide if creation/list/deletion of the given response.
-        self.response_value = resource(code[-1], response).code_checker()
+        self.response_value = resource(code, response).code_checker()
 
     def get_response(self):
         return self.response_value
 
 CopyCorpus().copy()
 bot = OpenStackBot()
+blob = Blob()
 app = Flask(__name__, template_folder='../templates')
-
